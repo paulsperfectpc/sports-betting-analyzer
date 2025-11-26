@@ -51,6 +51,9 @@ logger.setLevel(logging.DEBUG)
 
 app = Flask(__name__)
 
+# Flag to track if database has been initialized
+_db_initialized = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -83,102 +86,116 @@ SPORTSDATA_ENDPOINTS = {
 # =============================================================================
 def init_database():
     """Initialize SQLite database for caching"""
-    os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    global _db_initialized
+    if _db_initialized:
+        return
     
-    # Teams cache table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sport TEXT NOT NULL,
-            team_key TEXT NOT NULL,
-            team_name TEXT NOT NULL,
-            team_data TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sport, team_key)
-        )
-    ''')
+    try:
+        os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
     
-    # Players cache table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS players (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sport TEXT NOT NULL,
-            player_id TEXT NOT NULL,
-            player_name TEXT NOT NULL,
-            team_key TEXT,
-            player_data TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sport, player_id)
-        )
-    ''')
-    
-    # Games cache table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS games (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sport TEXT NOT NULL,
-            game_id TEXT NOT NULL,
-            game_date TEXT NOT NULL,
-            home_team TEXT NOT NULL,
-            away_team TEXT NOT NULL,
-            home_score INTEGER,
-            away_score INTEGER,
-            game_data TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sport, game_id)
-        )
-    ''')
-    
-    # Player game stats cache
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS player_game_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sport TEXT NOT NULL,
-            player_id TEXT NOT NULL,
-            game_id TEXT NOT NULL,
-            game_date TEXT NOT NULL,
-            stats_data TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sport, player_id, game_id)
-        )
-    ''')
-    
-    # Betting lines cache
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS betting_lines (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sport TEXT NOT NULL,
-            game_id TEXT NOT NULL,
-            line_type TEXT NOT NULL,
-            line_data TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(sport, game_id, line_type)
-        )
-    ''')
-    
-    # LLM conversation history
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS llm_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_type TEXT NOT NULL,
-            query_params TEXT NOT NULL,
-            llm_response TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    logger.info("Database initialized successfully")
+        # Teams cache table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport TEXT NOT NULL,
+                team_key TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                team_data TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sport, team_key)
+            )
+        ''')
+        
+        # Players cache table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                team_key TEXT,
+                player_data TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sport, player_id)
+            )
+        ''')
+        
+        # Games cache table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                game_date TEXT NOT NULL,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                home_score INTEGER,
+                away_score INTEGER,
+                game_data TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sport, game_id)
+            )
+        ''')
+        
+        # Player game stats cache
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_game_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                game_date TEXT NOT NULL,
+                stats_data TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sport, player_id, game_id)
+            )
+        ''')
+        
+        # Betting lines cache
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS betting_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sport TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                line_type TEXT NOT NULL,
+                line_data TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sport, game_id, line_type)
+            )
+        ''')
+        
+        # LLM conversation history
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS llm_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_type TEXT NOT NULL,
+                query_params TEXT NOT NULL,
+                llm_response TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        _db_initialized = True
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
 
 
 def get_db():
     """Get database connection"""
+    # Ensure database is initialized before any connection
+    init_database()
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# Initialize database at module load time (for gunicorn)
+init_database()
 
 
 # =============================================================================
@@ -230,7 +247,8 @@ class SportsDataAPI:
     def get_teams(self, sport):
         """Get all teams for a sport"""
         base_url = SPORTSDATA_ENDPOINTS[sport]['scores']
-        url = f"{base_url}/teams"
+        # Correct endpoint is /Teams (capital T) for active teams
+        url = f"{base_url}/Teams"
         return self._make_request(url)
     
     def get_team_schedule(self, sport, team_key, season=None):
@@ -296,21 +314,56 @@ class SportsDataAPI:
         return upcoming[:limit]
     
     def get_game_odds(self, sport, game_id=None):
-        """Get betting odds for games"""
-        base_url = SPORTSDATA_ENDPOINTS[sport]['odds']
+        """Get betting odds for games - returns current game odds from schedule data"""
+        # The odds are typically included in the Games/Scores response
+        # For dedicated odds, use TeamTrends or MatchupTrends
+        base_url = SPORTSDATA_ENDPOINTS[sport]['scores']
         season = self.get_current_season(sport)
         
         if sport == 'NFL':
-            url = f"{base_url}/GameOddsByWeek/{season}/1"  # Current week
+            url = f"{base_url}/Scores/{season}"
         else:
-            url = f"{base_url}/GameOddsByDate/{datetime.now().strftime('%Y-%m-%d')}"
+            url = f"{base_url}/Games/{season}"
         
-        odds = self._make_request(url)
-        if odds and game_id:
-            for game_odds in odds:
+        games = self._make_request(url)
+        if not games:
+            return None
+            
+        # Filter for upcoming games with odds
+        upcoming_with_odds = []
+        for game in games:
+            status = game.get('Status', '')
+            if status in ['Scheduled', 'InProgress']:
+                # Games often include pregame odds
+                if game.get('PointSpread') or game.get('OverUnder'):
+                    upcoming_with_odds.append({
+                        'GameId': game.get('GameID', game.get('ScoreID')),
+                        'HomeTeam': game.get('HomeTeam'),
+                        'AwayTeam': game.get('AwayTeam'),
+                        'DateTime': game.get('DateTime', game.get('Day')),
+                        'PointSpread': game.get('PointSpread'),
+                        'OverUnder': game.get('OverUnder'),
+                        'HomeTeamMoneyLine': game.get('HomeTeamMoneyLine'),
+                        'AwayTeamMoneyLine': game.get('AwayTeamMoneyLine')
+                    })
+        
+        if game_id:
+            for game_odds in upcoming_with_odds:
                 if str(game_odds.get('GameId')) == str(game_id):
                     return game_odds
-        return odds
+        return upcoming_with_odds
+    
+    def get_team_trends(self, sport, team_key):
+        """Get betting trends for a team"""
+        base_url = SPORTSDATA_ENDPOINTS[sport]['odds']
+        url = f"{base_url}/TeamTrends/{team_key.upper()}"
+        return self._make_request(url)
+    
+    def get_matchup_trends(self, sport, team1, team2):
+        """Get betting trends for a matchup between two teams"""
+        base_url = SPORTSDATA_ENDPOINTS[sport]['odds']
+        url = f"{base_url}/MatchupTrends/{team1.upper()}/{team2.upper()}"
+        return self._make_request(url)
     
     def get_player_stats(self, sport, player_name):
         """Search for player and get their recent stats"""
@@ -342,12 +395,8 @@ class SportsDataAPI:
         base_url = SPORTSDATA_ENDPOINTS[sport]['stats']
         season = self.get_current_season(sport)
         
-        if sport == 'NFL':
-            url = f"{base_url}/PlayerGameStatsBySeason/{season}/{player_id}/all"
-        elif sport == 'NBA':
-            url = f"{base_url}/PlayerGameStatsBySeason/{season}/{player_id}"
-        elif sport == 'NHL':
-            url = f"{base_url}/PlayerGameStatsBySeason/{season}/{player_id}"
+        # All sports use the same format: PlayerGameStatsBySeason/{season}/{playerid}/{numberofgames}
+        url = f"{base_url}/PlayerGameStatsBySeason/{season}/{player_id}/{limit}"
         
         game_logs = self._make_request(url)
         if game_logs:
@@ -549,15 +598,43 @@ def search_team():
     logger.info(f"Team search: {team_name} ({sport})")
     
     try:
+        # First, verify the team exists by getting all teams
+        all_teams = api.get_teams(sport)
+        if not all_teams:
+            return jsonify({"error": f"Could not fetch teams for {sport}. API may be unavailable."}), 500
+        
+        # Find matching team
+        team_key = None
+        for team in all_teams:
+            team_abbrev = team.get('Key', team.get('TeamID', ''))
+            team_full_name = team.get('Name', team.get('FullName', ''))
+            team_city = team.get('City', '')
+            
+            if (team_name.upper() == str(team_abbrev).upper() or 
+                team_name.lower() in team_full_name.lower() or
+                team_name.lower() in team_city.lower()):
+                team_key = team_abbrev
+                break
+        
+        if not team_key:
+            return jsonify({
+                "error": f"Team '{team_name}' not found in {sport}",
+                "available_teams": [t.get('Key', t.get('TeamID')) for t in all_teams[:32]]
+            }), 404
+        
+        logger.info(f"Found team: {team_key}")
+        
         # Check cache first
-        cached_games = get_cached_team_games(sport, team_name, 10)
+        cached_games = get_cached_team_games(sport, team_key, 10)
+        logger.info(f"Cached games found: {len(cached_games)}")
         
         # Determine how many new games to fetch
         games_needed = 10 - len(cached_games)
         
         if games_needed > 0 or len(cached_games) == 0:
             # Fetch from API
-            completed_games = api.get_completed_games(sport, team_name, 10)
+            completed_games = api.get_completed_games(sport, team_key, 10)
+            logger.info(f"Fetched {len(completed_games)} completed games from API")
             
             # Cache new games
             for game in completed_games:
@@ -568,8 +645,9 @@ def search_team():
             # Use cached data
             games_data = [json.loads(g['game_data']) for g in cached_games]
         
-        # Get upcoming games and odds
-        upcoming = api.get_upcoming_games(sport, team_name, 3)
+        # Get upcoming games
+        upcoming = api.get_upcoming_games(sport, team_key, 3)
+        logger.info(f"Fetched {len(upcoming)} upcoming games")
         
         # Get odds for upcoming games
         odds_data = []
@@ -580,12 +658,16 @@ def search_team():
                 if odds:
                     odds_data.append(odds)
         
+        # Try to get team trends (betting performance)
+        team_trends = api.get_team_trends(sport, team_key)
+        
         result = {
-            "team": team_name.upper(),
+            "team": team_key,
             "sport": sport,
             "recent_games": games_data[:10],
             "upcoming_games": upcoming,
             "betting_lines": odds_data,
+            "team_trends": team_trends if team_trends else None,
             "games_from_cache": len(cached_games),
             "api_calls_made": api.request_count
         }
@@ -641,6 +723,9 @@ def search_teams():
             if game_id:
                 matchup_odds = api.get_game_odds(sport, game_id)
         
+        # Get matchup trends (head-to-head betting trends)
+        matchup_trends = api.get_matchup_trends(sport, team1, team2)
+        
         result = {
             "sport": sport,
             "team1": {
@@ -653,6 +738,7 @@ def search_teams():
             },
             "matchup": matchup_game,
             "betting_lines": matchup_odds,
+            "matchup_trends": matchup_trends if matchup_trends else None,
             "api_calls_made": api.request_count
         }
         
