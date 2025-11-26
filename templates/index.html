@@ -340,6 +340,11 @@
             border-radius: 8px;
         }
 
+        .llm-loading {
+            text-align: center;
+            padding: 20px;
+        }
+
         /* Test Panel */
         .test-panel {
             background: rgba(123, 44, 191, 0.1);
@@ -565,11 +570,31 @@
 
                 const data = await response.json();
 
-                if (data.success) {
-                    responseDiv.textContent = `✅ Success!\n\nModel: ${data.model}\n\nResponse:\n${data.response}`;
-                } else {
-                    responseDiv.textContent = `❌ Error: ${data.error}`;
+                let output = '';
+                output += `Host: ${data.configured_host}\n`;
+                output += `Model: ${data.configured_model}\n\n`;
+                
+                if (data.connectivity_test) {
+                    output += `Connectivity: ${data.connectivity_test.success ? '✅ OK' : '❌ FAILED'}\n`;
+                    if (data.connectivity_test.error) {
+                        output += `  Error: ${data.connectivity_test.error}\n`;
+                    }
                 }
+                
+                if (data.available_models && data.available_models.length > 0) {
+                    output += `Available Models: ${data.available_models.join(', ')}\n\n`;
+                }
+                
+                if (data.generate_test) {
+                    output += `Generate Test: ${data.generate_test.success ? '✅ OK' : '❌ FAILED'}\n`;
+                    if (data.generate_test.success) {
+                        output += `\nResponse:\n${data.generate_test.response}`;
+                    } else if (data.generate_test.error) {
+                        output += `  Error: ${data.generate_test.error}\n`;
+                    }
+                }
+
+                responseDiv.textContent = output;
             } catch (error) {
                 responseDiv.textContent = `❌ Connection Error: ${error.message}`;
             } finally {
@@ -643,7 +668,7 @@
             resultsDiv.innerHTML = `
                 <div class="loading">
                     <div class="spinner"></div>
-                    <p>Fetching data and analyzing with AI...</p>
+                    <p>Fetching sports data...</p>
                 </div>
             `;
 
@@ -670,7 +695,12 @@
                     throw new Error(data.error || 'An error occurred');
                 }
 
+                // Display results immediately (without LLM analysis)
                 displayResults(data, endpoint);
+                
+                // Now fetch LLM analysis in background
+                fetchLLMAnalysis(data, endpoint);
+                
             } catch (error) {
                 resultsDiv.innerHTML = `
                     <div class="error-card">
@@ -678,6 +708,64 @@
                         <p>${error.message}</p>
                     </div>
                 `;
+            }
+        }
+        
+        // Fetch LLM analysis asynchronously and update the UI
+        async function fetchLLMAnalysis(data, endpoint) {
+            // Determine analysis type
+            let analysisType = 'team';
+            if (endpoint.includes('/teams')) {
+                analysisType = 'team_comparison';
+            } else if (endpoint.includes('/player')) {
+                analysisType = 'player';
+            }
+            
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: analysisType,
+                        data: data
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // Update the LLM section in the DOM
+                const llmSection = document.getElementById('llm-analysis-section');
+                if (llmSection) {
+                    if (result.success) {
+                        llmSection.innerHTML = `
+                            <div class="llm-header">
+                                <span class="llm-icon">🤖</span>
+                                <span class="llm-title">AI Analysis (Ollama - qwen3:4b)</span>
+                            </div>
+                            <div class="llm-content">${result.analysis}</div>
+                        `;
+                    } else {
+                        llmSection.innerHTML = `
+                            <div class="llm-header">
+                                <span class="llm-icon">🤖</span>
+                                <span class="llm-title">AI Analysis</span>
+                            </div>
+                            <div class="llm-error">Analysis unavailable: ${result.error || 'Unknown error'}</div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error('LLM analysis fetch error:', error);
+                const llmSection = document.getElementById('llm-analysis-section');
+                if (llmSection) {
+                    llmSection.innerHTML = `
+                        <div class="llm-header">
+                            <span class="llm-icon">🤖</span>
+                            <span class="llm-title">AI Analysis</span>
+                        </div>
+                        <div class="llm-error">Failed to load AI analysis: ${error.message}</div>
+                    `;
+                }
             }
         }
 
@@ -722,8 +810,13 @@
                 data.recent_games.forEach(game => {
                     const isHome = game.HomeTeam?.toUpperCase() === data.team?.toUpperCase();
                     const opponent = isHome ? game.AwayTeam : game.HomeTeam;
-                    const teamScore = isHome ? (game.HomeTeamScore || game.HomeScore) : (game.AwayTeamScore || game.AwayScore);
-                    const oppScore = isHome ? (game.AwayTeamScore || game.AwayScore) : (game.HomeTeamScore || game.HomeScore);
+                    
+                    // Handle various score field names from different sports/endpoints
+                    const homeScore = game.HomeTeamScore ?? game.HomeScore ?? game.HomeTeamRuns ?? 0;
+                    const awayScore = game.AwayTeamScore ?? game.AwayScore ?? game.AwayTeamRuns ?? 0;
+                    
+                    const teamScore = isHome ? homeScore : awayScore;
+                    const oppScore = isHome ? awayScore : homeScore;
                     const won = teamScore > oppScore;
                     const gameDate = game.DateTime || game.Day || 'N/A';
 
@@ -880,8 +973,13 @@
             games.forEach(game => {
                 const isHome = game.HomeTeam?.toUpperCase() === teamName?.toUpperCase();
                 const opponent = isHome ? game.AwayTeam : game.HomeTeam;
-                const teamScore = isHome ? (game.HomeTeamScore || game.HomeScore) : (game.AwayTeamScore || game.AwayScore);
-                const oppScore = isHome ? (game.AwayTeamScore || game.AwayScore) : (game.HomeTeamScore || game.HomeScore);
+                
+                // Handle various score field names from different sports/endpoints
+                const homeScore = game.HomeTeamScore ?? game.HomeScore ?? game.HomeTeamRuns ?? 0;
+                const awayScore = game.AwayTeamScore ?? game.AwayScore ?? game.AwayTeamRuns ?? 0;
+                
+                const teamScore = isHome ? homeScore : awayScore;
+                const oppScore = isHome ? awayScore : homeScore;
                 const won = teamScore > oppScore;
                 const gameDate = game.DateTime || game.Day || 'N/A';
 
@@ -926,20 +1024,34 @@
             </div>`;
         }
 
-        // Helper: Render LLM Analysis
+        // Helper: Render LLM Analysis section (with loading placeholder)
         function renderLLMAnalysis(llm) {
-            if (!llm) return '';
-
-            let html = `<div class="llm-section">
-                <div class="llm-header">
+            // Always render the section with an ID for async update
+            let html = `<div class="llm-section" id="llm-analysis-section">`;
+            
+            if (llm && llm.success) {
+                // If LLM data already present (from previous code path)
+                html += `<div class="llm-header">
                     <span class="llm-icon">🤖</span>
                     <span class="llm-title">AI Analysis (Ollama - qwen3:4b)</span>
                 </div>`;
-
-            if (llm.success) {
                 html += `<div class="llm-content">${llm.analysis}</div>`;
+            } else if (llm && llm.error) {
+                html += `<div class="llm-header">
+                    <span class="llm-icon">🤖</span>
+                    <span class="llm-title">AI Analysis</span>
+                </div>`;
+                html += `<div class="llm-error">Analysis unavailable: ${llm.error}</div>`;
             } else {
-                html += `<div class="llm-error">Analysis unavailable: ${llm.error || 'Unknown error'}</div>`;
+                // Show loading state - will be replaced by fetchLLMAnalysis
+                html += `<div class="llm-header">
+                    <span class="llm-icon">🤖</span>
+                    <span class="llm-title">AI Analysis (Loading...)</span>
+                </div>`;
+                html += `<div class="llm-loading">
+                    <div class="spinner" style="width: 24px; height: 24px; border-width: 3px; margin: 10px auto;"></div>
+                    <p style="color: #888; font-size: 0.9em;">Analyzing data with Ollama AI... This may take up to 90 seconds.</p>
+                </div>`;
             }
 
             html += `</div>`;

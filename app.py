@@ -78,7 +78,7 @@ _db_initialized = False
 # CONFIGURATION
 # =============================================================================
 SPORTSDATA_API_KEY = os.getenv('SPORTSDATA_API_KEY', '1fdd78185de84dc1bd82ff59f254c087')
-OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://10.254.254.220:11434')
+OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://10.254.254.203:11434')  # Updated Ollama host
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3:4b')
 DATABASE_PATH = os.getenv('DATABASE_PATH', '/app/data/sportsdata.db')
 
@@ -508,93 +508,124 @@ def get_cached_count(sport, team_key):
 # LLM INTEGRATION
 # =============================================================================
 def analyze_with_llm(data, query_type):
-    """Send data to Ollama for analysis - non-blocking with short timeout"""
+    """Send data to Ollama for analysis - with extended timeout for slower GPUs"""
+    logger.info(f"Starting LLM analysis for query_type: {query_type}")
+    
     try:
         # Limit data size to prevent huge prompts
         limited_data = {k: v for k, v in data.items() if k not in ['llm_analysis']}
         
-        # Truncate game data to last 5 games to keep prompt manageable
+        # Truncate game data to last 3 games to keep prompt small for faster inference
         if 'recent_games' in limited_data:
-            limited_data['recent_games'] = limited_data['recent_games'][:5]
+            limited_data['recent_games'] = limited_data['recent_games'][:3]
         if 'team1' in limited_data and 'recent_games' in limited_data.get('team1', {}):
-            limited_data['team1']['recent_games'] = limited_data['team1']['recent_games'][:5]
+            limited_data['team1']['recent_games'] = limited_data['team1']['recent_games'][:3]
         if 'team2' in limited_data and 'recent_games' in limited_data.get('team2', {}):
-            limited_data['team2']['recent_games'] = limited_data['team2']['recent_games'][:5]
+            limited_data['team2']['recent_games'] = limited_data['team2']['recent_games'][:3]
         
         if query_type == 'team':
-            prompt = f"""You are a sports betting analyst. Analyze the following team data and betting lines.
-            
+            prompt = f"""Analyze this team's betting outlook briefly.
+
 Data: {json.dumps(limited_data, indent=2)}
 
-Based on this data, provide:
-1. Your prediction for the team's next game (win/loss)
-2. Recommended bets (spread, moneyline, over/under) with confidence levels
-3. Key factors influencing your prediction
-4. Any trends you notice from recent games
-
-Be concise but thorough. Format your response clearly with sections."""
+Provide: 1) Next game prediction 2) Best bet recommendation 3) Key factors. Be concise."""
 
         elif query_type == 'team_comparison':
-            prompt = f"""You are a sports betting analyst. Analyze this matchup between two teams.
-            
+            prompt = f"""Analyze this matchup briefly.
+
 Data: {json.dumps(limited_data, indent=2)}
 
-Based on this data, provide:
-1. Predicted winner and score prediction
-2. Spread recommendation (which team to take)
-3. Over/Under recommendation
-4. Moneyline value analysis
-5. Key factors and trends supporting your picks
-
-Be specific with numbers and confidence levels."""
+Provide: 1) Predicted winner 2) Spread pick 3) Over/Under pick. Be concise."""
 
         elif query_type == 'player':
-            prompt = f"""You are a sports betting analyst specializing in player props.
-            
-Player Data: {json.dumps(limited_data, indent=2)}
+            prompt = f"""Analyze this player's props briefly.
 
-Based on this player's recent performance, provide:
-1. Analysis of their recent form and trends
-2. Recommended player prop bets with lines
-3. Props to avoid
-4. Confidence levels for each recommendation
+Data: {json.dumps(limited_data, indent=2)}
 
-Focus on statistical trends and matchup factors."""
+Provide: 1) Recent form 2) Best prop bet 3) Confidence level. Be concise."""
 
         else:
-            prompt = f"Analyze this sports data: {json.dumps(limited_data)}"
+            prompt = f"Analyze briefly: {json.dumps(limited_data)}"
         
-        # Call Ollama with shorter timeout (30s) to prevent blocking
+        # Detailed logging for LLM debugging
+        ollama_url = f"{OLLAMA_HOST}/api/generate"
+        logger.info(f"=" * 50)
+        logger.info(f"LLM REQUEST STARTING")
+        logger.info(f"Ollama URL: {ollama_url}")
+        logger.info(f"Ollama Model: {OLLAMA_MODEL}")
+        logger.info(f"Prompt length: {len(prompt)} chars")
+        logger.info(f"=" * 50)
+        
+        # Test connectivity first
+        try:
+            logger.info(f"Testing Ollama connectivity...")
+            test_response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=10)
+            logger.info(f"Ollama connectivity test: {test_response.status_code}")
+            if test_response.ok:
+                models = test_response.json().get('models', [])
+                model_names = [m.get('name', 'unknown') for m in models]
+                logger.info(f"Available models: {model_names}")
+        except Exception as conn_err:
+            logger.error(f"Ollama connectivity test FAILED: {conn_err}")
+        
+        # Call Ollama with extended timeout for GTX 1070 (90 seconds)
+        logger.info(f"Sending generate request to Ollama...")
         response = requests.post(
-            f"{OLLAMA_HOST}/api/generate",
+            ollama_url,
             json={
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
                     "temperature": 0.7,
-                    "num_predict": 500  # Reduced for faster response
+                    "num_predict": 300  # Reduced for faster response on slower GPU
                 }
             },
-            timeout=30
+            timeout=90  # Extended timeout for GTX 1070
         )
+        
+        logger.info(f"Ollama response received!")
+        logger.info(f"Ollama response status: {response.status_code}")
+        logger.info(f"Response headers: {dict(response.headers)}")
         
         if response.ok:
             result = response.json()
+            analysis = result.get('response', 'No response generated')
+            logger.info(f"LLM analysis complete, length: {len(analysis)} chars")
+            logger.info(f"=" * 50)
             return {
                 "success": True,
-                "analysis": result.get('response', 'No response generated')
+                "analysis": analysis
             }
         else:
+            logger.error(f"Ollama error: {response.status_code} - {response.text[:500]}")
+            logger.info(f"=" * 50)
             return {
                 "success": False,
                 "error": f"Ollama returned status {response.status_code}"
             }
             
-    except requests.exceptions.Timeout:
-        return {"success": False, "error": "LLM request timed out"}
+    except requests.exceptions.Timeout as e:
+        logger.error(f"=" * 50)
+        logger.error(f"LLM TIMEOUT ERROR")
+        logger.error(f"Ollama URL: {OLLAMA_HOST}/api/generate")
+        logger.error(f"Timeout after 90 seconds")
+        logger.error(f"Exception: {e}")
+        logger.error(f"=" * 50)
+        return {"success": False, "error": f"LLM request timed out connecting to {OLLAMA_HOST}"}
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"=" * 50)
+        logger.error(f"LLM CONNECTION ERROR")
+        logger.error(f"Cannot connect to Ollama at: {OLLAMA_HOST}")
+        logger.error(f"Exception: {e}")
+        logger.error(f"=" * 50)
+        return {"success": False, "error": f"Cannot connect to Ollama at {OLLAMA_HOST} - check if Ollama is running"}
     except Exception as e:
-        logger.error(f"LLM analysis error: {e}")
+        logger.error(f"=" * 50)
+        logger.error(f"LLM UNEXPECTED ERROR")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception: {e}", exc_info=True)
+        logger.error(f"=" * 50)
         return {"success": False, "error": str(e)}
 
 
@@ -676,6 +707,9 @@ def search_team():
             # Use cached data
             games_data = [json.loads(g['game_data']) for g in cached_games]
         
+        # Ensure games are sorted by date (newest first)
+        games_data.sort(key=lambda x: x.get('DateTime', x.get('Day', '')), reverse=True)
+        
         # Get upcoming games
         upcoming = api.get_upcoming_games(sport, team_key, 3)
         logger.info(f"Fetched {len(upcoming)} upcoming games")
@@ -703,10 +737,9 @@ def search_team():
             "api_calls_made": api.request_count
         }
         
-        # Get LLM analysis
-        llm_result = analyze_with_llm(result, 'team')
-        result['llm_analysis'] = llm_result
+        logger.info(f"Team data compiled, returning results (LLM analysis will be fetched separately)")
         
+        # Return data immediately - LLM analysis fetched separately via /api/analyze
         return jsonify(result)
         
     except Exception as e:
@@ -731,6 +764,10 @@ def search_teams():
         # Get last 5 games for each team
         team1_games = api.get_completed_games(sport, team1, 5)
         team2_games = api.get_completed_games(sport, team2, 5)
+        
+        # Ensure sorted by date (newest first)
+        team1_games.sort(key=lambda x: x.get('DateTime', x.get('Day', '')), reverse=True)
+        team2_games.sort(key=lambda x: x.get('DateTime', x.get('Day', '')), reverse=True)
         
         # Cache games
         for game in team1_games + team2_games:
@@ -773,10 +810,9 @@ def search_teams():
             "api_calls_made": api.request_count
         }
         
-        # Get LLM analysis
-        llm_result = analyze_with_llm(result, 'team_comparison')
-        result['llm_analysis'] = llm_result
+        logger.info(f"Team comparison data compiled, returning results")
         
+        # Return data immediately - LLM analysis fetched separately via /api/analyze
         return jsonify(result)
         
     except Exception as e:
@@ -821,10 +857,9 @@ def search_player():
             "api_calls_made": api.request_count
         }
         
-        # Get LLM analysis
-        llm_result = analyze_with_llm(result, 'player')
-        result['llm_analysis'] = llm_result
+        logger.info(f"Player data compiled, returning results")
         
+        # Return data immediately - LLM analysis fetched separately via /api/analyze
         return jsonify(result)
         
     except Exception as e:
@@ -834,12 +869,55 @@ def search_player():
 
 @app.route('/api/test/ollama', methods=['POST'])
 def test_ollama():
-    """Test Ollama connection"""
-    data = request.json
+    """Test Ollama connection with detailed logging"""
+    data = request.json or {}
     prompt = data.get('prompt', 'Hello, respond with a short greeting.')
     
+    logger.info(f"=" * 50)
+    logger.info(f"OLLAMA TEST REQUEST")
+    logger.info(f"Configured Host: {OLLAMA_HOST}")
+    logger.info(f"Configured Model: {OLLAMA_MODEL}")
+    logger.info(f"=" * 50)
+    
+    result = {
+        "configured_host": OLLAMA_HOST,
+        "configured_model": OLLAMA_MODEL,
+        "connectivity_test": None,
+        "available_models": [],
+        "generate_test": None
+    }
+    
+    # Step 1: Test basic connectivity
     try:
-        response = requests.post(
+        logger.info(f"Step 1: Testing connectivity to {OLLAMA_HOST}...")
+        conn_response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=10)
+        result["connectivity_test"] = {
+            "success": conn_response.ok,
+            "status_code": conn_response.status_code
+        }
+        logger.info(f"Connectivity test: {conn_response.status_code}")
+        
+        if conn_response.ok:
+            models_data = conn_response.json()
+            result["available_models"] = [m.get('name') for m in models_data.get('models', [])]
+            logger.info(f"Available models: {result['available_models']}")
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection FAILED: {e}")
+        result["connectivity_test"] = {"success": False, "error": f"Connection failed: {e}"}
+        return jsonify({"success": False, **result}), 500
+    except requests.exceptions.Timeout:
+        logger.error(f"Connection TIMEOUT")
+        result["connectivity_test"] = {"success": False, "error": "Connection timed out"}
+        return jsonify({"success": False, **result}), 500
+    except Exception as e:
+        logger.error(f"Connection ERROR: {e}")
+        result["connectivity_test"] = {"success": False, "error": str(e)}
+        return jsonify({"success": False, **result}), 500
+    
+    # Step 2: Test generate endpoint
+    try:
+        logger.info(f"Step 2: Testing generate with model {OLLAMA_MODEL}...")
+        gen_response = requests.post(
             f"{OLLAMA_HOST}/api/generate",
             json={
                 "model": OLLAMA_MODEL,
@@ -849,24 +927,54 @@ def test_ollama():
             timeout=60
         )
         
-        if response.ok:
-            result = response.json()
-            return jsonify({
+        logger.info(f"Generate response status: {gen_response.status_code}")
+        
+        if gen_response.ok:
+            gen_result = gen_response.json()
+            result["generate_test"] = {
                 "success": True,
-                "response": result.get('response', ''),
-                "model": OLLAMA_MODEL
-            })
+                "response": gen_result.get('response', ''),
+                "model": gen_result.get('model', OLLAMA_MODEL)
+            }
+            logger.info(f"Generate SUCCESS")
+            return jsonify({"success": True, **result})
         else:
-            return jsonify({
+            result["generate_test"] = {
                 "success": False,
-                "error": f"Status {response.status_code}"
-            }), 500
+                "status_code": gen_response.status_code,
+                "error": gen_response.text[:500]
+            }
+            logger.error(f"Generate FAILED: {gen_response.status_code}")
+            return jsonify({"success": False, **result}), 500
             
+    except requests.exceptions.Timeout:
+        logger.error(f"Generate TIMEOUT")
+        result["generate_test"] = {"success": False, "error": "Request timed out after 60s"}
+        return jsonify({"success": False, **result}), 500
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        logger.error(f"Generate ERROR: {e}")
+        result["generate_test"] = {"success": False, "error": str(e)}
+        return jsonify({"success": False, **result}), 500
+
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze_data():
+    """Separate endpoint for LLM analysis - called after data is displayed"""
+    data = request.json
+    query_type = data.get('type', 'team')  # 'team', 'team_comparison', or 'player'
+    analysis_data = data.get('data', {})
+    
+    if not analysis_data:
+        return jsonify({"success": False, "error": "No data provided for analysis"}), 400
+    
+    logger.info(f"Starting async LLM analysis for type: {query_type}")
+    
+    try:
+        result = analyze_with_llm(analysis_data, query_type)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Analysis endpoint error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/health', methods=['GET'])
