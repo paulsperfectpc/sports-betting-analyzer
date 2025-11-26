@@ -4,7 +4,7 @@ services:
   sports-analyzer:
     build:
       context: .
-      dockerfile: Dockerfile_v2
+      dockerfile: Dockerfile
     container_name: sports-betting-analyzer-v2
     restart: unless-stopped
     ports:
