@@ -8,6 +8,7 @@ from flask import Flask, render_template, request, jsonify
 import requests
 import sqlite3
 import json
+import re
 from datetime import datetime, timedelta
 import os
 import logging
@@ -249,19 +250,38 @@ class SportsDataAPI:
             return None
     
     def get_current_season(self, sport):
-        """Get current season identifier"""
+        """Get current season identifier
+        
+        Season naming conventions:
+        - NFL: 2025 = 2025-2026 season (Sept 2025 - Feb 2026)
+        - NBA: 2025 = 2024-2025 season (Oct 2024 - June 2025), 2026 = 2025-2026 season
+        - NHL: 2025 = 2024-2025 season (Oct 2024 - June 2025), 2026 = 2025-2026 season
+        """
         now = datetime.now()
         year = now.year
+        month = now.month
         
         if sport == 'NFL':
-            # NFL season runs Sept-Feb, use year of season start
-            return year if now.month >= 9 else year - 1
+            # NFL: Season named by start year. 2025 season runs Sept 2025 - Feb 2026
+            return year if month >= 9 else year - 1
         elif sport == 'NBA':
-            # NBA season runs Oct-June, use year of season start
-            return year if now.month >= 10 else year - 1
+            # NBA: Season named by END year. 2026 season runs Oct 2025 - June 2026
+            # If Oct-Dec, we're in next year's season
+            if month >= 10:
+                return year + 1
+            elif month <= 6:
+                return year
+            else:  # July-Sept = offseason, show last season
+                return year
         elif sport == 'NHL':
-            # NHL season runs Oct-June, use year of season start
-            return year if now.month >= 10 else year - 1
+            # NHL: Season named by END year. 2026 season runs Oct 2025 - June 2026
+            # If Oct-Dec, we're in next year's season
+            if month >= 10:
+                return year + 1
+            elif month <= 6:
+                return year
+            else:  # July-Sept = offseason, show last season
+                return year
         return year
     
     def get_teams(self, sport):
@@ -512,40 +532,59 @@ def analyze_with_llm(data, query_type):
     logger.info(f"Starting LLM analysis for query_type: {query_type}")
     
     try:
-        # Limit data size to prevent huge prompts
-        limited_data = {k: v for k, v in data.items() if k not in ['llm_analysis']}
+        # Create a MINIMAL summary to keep prompt small for qwen3:4b
+        def summarize_games(games, limit=3):
+            """Extract only essential game info"""
+            summary = []
+            for g in (games or [])[:limit]:
+                summary.append({
+                    'date': g.get('DateTime', g.get('Day', ''))[:10] if g.get('DateTime') or g.get('Day') else 'N/A',
+                    'home': g.get('HomeTeam'),
+                    'away': g.get('AwayTeam'),
+                    'score': f"{g.get('HomeTeamScore', g.get('HomeScore', 0))}-{g.get('AwayTeamScore', g.get('AwayScore', 0))}"
+                })
+            return summary
         
-        # Truncate game data to last 3 games to keep prompt small for faster inference
-        if 'recent_games' in limited_data:
-            limited_data['recent_games'] = limited_data['recent_games'][:3]
-        if 'team1' in limited_data and 'recent_games' in limited_data.get('team1', {}):
-            limited_data['team1']['recent_games'] = limited_data['team1']['recent_games'][:3]
-        if 'team2' in limited_data and 'recent_games' in limited_data.get('team2', {}):
-            limited_data['team2']['recent_games'] = limited_data['team2']['recent_games'][:3]
-        
+        # Build minimal data for prompt
         if query_type == 'team':
-            prompt = f"""Analyze this team's betting outlook briefly.
+            minimal_data = {
+                'team': data.get('team'),
+                'sport': data.get('sport'),
+                'recent_games': summarize_games(data.get('recent_games', []), 5),
+                'betting_lines': data.get('betting_lines', [])[:1] if data.get('betting_lines') else None
+            }
+            prompt = f"""Analyze this team briefly. Data: {json.dumps(minimal_data)}
 
-Data: {json.dumps(limited_data, indent=2)}
-
-Provide: 1) Next game prediction 2) Best bet recommendation 3) Key factors. Be concise."""
+Give: 1) Win/loss trend 2) Best bet 3) Key factor. Be very concise, 2-3 sentences max."""
 
         elif query_type == 'team_comparison':
-            prompt = f"""Analyze this matchup briefly.
+            minimal_data = {
+                'team1': data.get('team1', {}).get('name'),
+                'team1_games': summarize_games(data.get('team1', {}).get('recent_games', []), 3),
+                'team2': data.get('team2', {}).get('name'),
+                'team2_games': summarize_games(data.get('team2', {}).get('recent_games', []), 3),
+                'matchup': data.get('matchup'),
+                'betting_lines': data.get('betting_lines')
+            }
+            prompt = f"""Analyze this matchup briefly. Data: {json.dumps(minimal_data)}
 
-Data: {json.dumps(limited_data, indent=2)}
-
-Provide: 1) Predicted winner 2) Spread pick 3) Over/Under pick. Be concise."""
+Give: 1) Predicted winner 2) Spread pick 3) O/U pick. Be very concise, 2-3 sentences max."""
 
         elif query_type == 'player':
-            prompt = f"""Analyze this player's props briefly.
+            minimal_data = {
+                'player': data.get('player'),
+                'team': data.get('team'),
+                'sport': data.get('sport'),
+                'game_logs': summarize_games(data.get('game_logs', []), 3)
+            }
+            prompt = f"""Analyze this player briefly. Data: {json.dumps(minimal_data)}
 
-Data: {json.dumps(limited_data, indent=2)}
-
-Provide: 1) Recent form 2) Best prop bet 3) Confidence level. Be concise."""
+Give: 1) Recent form 2) Best prop bet. Be very concise, 2-3 sentences max."""
 
         else:
-            prompt = f"Analyze briefly: {json.dumps(limited_data)}"
+            prompt = f"Analyze briefly: {json.dumps(data)[:500]}"
+        
+        logger.info(f"Prompt length: {len(prompt)} chars")
         
         # Detailed logging for LLM debugging
         ollama_url = f"{OLLAMA_HOST}/api/generate"
@@ -553,7 +592,6 @@ Provide: 1) Recent form 2) Best prop bet 3) Confidence level. Be concise."""
         logger.info(f"LLM REQUEST STARTING")
         logger.info(f"Ollama URL: {ollama_url}")
         logger.info(f"Ollama Model: {OLLAMA_MODEL}")
-        logger.info(f"Prompt length: {len(prompt)} chars")
         logger.info(f"=" * 50)
         
         # Test connectivity first
@@ -591,6 +629,8 @@ Provide: 1) Recent form 2) Best prop bet 3) Confidence level. Be concise."""
         if response.ok:
             result = response.json()
             analysis = result.get('response', 'No response generated')
+            # Strip any <think> tags from qwen3 model
+            analysis = re.sub(r'<think>.*?</think>', '', analysis, flags=re.DOTALL).strip()
             logger.info(f"LLM analysis complete, length: {len(analysis)} chars")
             logger.info(f"=" * 50)
             return {
