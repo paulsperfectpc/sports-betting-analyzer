@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  sports-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile_v2
+    container_name: sports-betting-analyzer-v2
+    restart: unless-stopped
+    ports:
+      - "11200:11200"
+    environment:
+      - SPORTSDATA_API_KEY=1fdd78185de84dc1bd82ff59f254c087
+      - OLLAMA_HOST=http://10.254.254.220:11434
+      - OLLAMA_MODEL=qwen3:4b
+      - DATABASE_PATH=/app/data/sportsdata.db
+    volumes:
+      - sports-data:/app/data
+    networks:
+      - default
+
+volumes:
+  sports-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

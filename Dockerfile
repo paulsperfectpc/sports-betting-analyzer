@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements_v2.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY app_v2.py app.py
+COPY templates/index_v2.html templates/index.html
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Expose port
+EXPOSE 11200
+
+# Run with gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:11200", "--workers", "2", "--timeout", "120", "app:app"]

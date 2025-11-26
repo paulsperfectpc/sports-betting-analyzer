@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sports Betting Analyzer v2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        /* Sport Tabs */
+        .sport-tabs {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .sport-tab {
+            padding: 12px 30px;
+            border: 2px solid #333;
+            background: transparent;
+            color: #888;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .sport-tab:hover {
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+
+        .sport-tab.active {
+            background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+            border-color: transparent;
+            color: #fff;
+        }
+
+        /* Search Type Tabs */
+        .search-type-tabs {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .search-type-tab {
+            padding: 10px 25px;
+            border: 1px solid #444;
+            background: #222;
+            color: #aaa;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .search-type-tab:hover {
+            border-color: #666;
+            color: #fff;
+        }
+
+        .search-type-tab.active {
+            background: #333;
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+
+        /* Search Panel */
+        .search-panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .search-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #333;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 1rem;
+            border-radius: 8px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        .search-input::placeholder {
+            color: #666;
+        }
+
+        .search-btn {
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+            border: none;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Hidden elements */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Results Section */
+        .results-section {
+            margin-top: 30px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #333;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Result Cards */
+        .result-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .result-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .result-badge {
+            background: #333;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        /* Games Table */
+        .games-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .games-table th,
+        .games-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .games-table th {
+            color: #888;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+        }
+
+        .games-table tr:hover {
+            background: rgba(255,255,255,0.03);
+        }
+
+        .win {
+            color: #00d26a;
+            font-weight: 600;
+        }
+
+        .loss {
+            color: #ff4757;
+            font-weight: 600;
+        }
+
+        /* Betting Lines */
+        .betting-section {
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        .betting-title {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #00d4ff;
+        }
+
+        .betting-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .betting-item {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .betting-label {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .betting-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        /* LLM Analysis */
+        .llm-section {
+            background: linear-gradient(135deg, rgba(123, 44, 191, 0.2), rgba(0, 212, 255, 0.2));
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 30px;
+            border: 1px solid rgba(123, 44, 191, 0.3);
+        }
+
+        .llm-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .llm-icon {
+            font-size: 1.5rem;
+        }
+
+        .llm-title {
+            font-size: 1.2rem;
+            color: #00d4ff;
+        }
+
+        .llm-content {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            color: #ddd;
+        }
+
+        .llm-error {
+            color: #ff4757;
+            padding: 15px;
+            background: rgba(255, 71, 87, 0.1);
+            border-radius: 8px;
+        }
+
+        /* Test Panel */
+        .test-panel {
+            background: rgba(123, 44, 191, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(123, 44, 191, 0.2);
+        }
+
+        .test-panel h3 {
+            color: #7b2cbf;
+            margin-bottom: 15px;
+        }
+
+        .test-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .test-input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #444;
+            background: #1a1a2e;
+            color: #fff;
+            border-radius: 6px;
+        }
+
+        .test-btn {
+            padding: 10px 20px;
+            background: #7b2cbf;
+            border: none;
+            color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .test-response {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* Error Message */
+        .error-card {
+            background: rgba(255, 71, 87, 0.1);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            color: #ff4757;
+        }
+
+        /* Team Comparison */
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .team-card {
+            background: rgba(255,255,255,0.03);
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .team-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #00d4ff;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sport-tabs {
+                flex-wrap: wrap;
+            }
+
+            .search-row {
+                flex-direction: column;
+            }
+
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏆 Sports Betting Analyzer v2</h1>
+            <p class="subtitle">NFL • NBA • NHL | Powered by SportsData.io + Ollama AI</p>
+        </header>
+
+        <!-- Ollama Test Panel -->
+        <div class="test-panel">
+            <h3>🤖 Test Ollama Connection</h3>
+            <div class="test-row">
+                <input type="text" id="test-prompt" class="test-input" placeholder="Enter a test prompt..." value="Hello! Give a brief response.">
+                <button type="button" class="test-btn" id="test-btn">Test</button>
+            </div>
+            <div id="test-response" class="test-response hidden"></div>
+        </div>
+
+        <!-- Sport Selection -->
+        <div class="sport-tabs">
+            <button type="button" class="sport-tab" data-sport="NFL">🏈 NFL</button>
+            <button type="button" class="sport-tab" data-sport="NBA">🏀 NBA</button>
+            <button type="button" class="sport-tab" data-sport="NHL">🏒 NHL</button>
+        </div>
+
+        <!-- Search Type Selection -->
+        <div class="search-type-tabs">
+            <button type="button" class="search-type-tab active" data-type="team">Single Team</button>
+            <button type="button" class="search-type-tab" data-type="teams">Compare Teams</button>
+            <button type="button" class="search-type-tab" data-type="player">Player Props</button>
+        </div>
+
+        <!-- Search Panel -->
+        <div class="search-panel">
+            <!-- Single Team Search -->
+            <div id="team-search">
+                <div class="search-row">
+                    <input type="text" class="search-input" id="team-input" placeholder="Enter team name (e.g., Lakers, Chiefs, Bruins)">
+                    <button type="button" class="search-btn" id="team-search-btn">🔍 Analyze</button>
+                </div>
+            </div>
+
+            <!-- Team Comparison Search -->
+            <div id="teams-search" class="hidden">
+                <div class="search-row">
+                    <input type="text" class="search-input" id="team1-input" placeholder="Team 1 (e.g., Lakers)">
+                    <input type="text" class="search-input" id="team2-input" placeholder="Team 2 (e.g., Celtics)">
+                </div>
+                <div class="search-row">
+                    <button type="button" class="search-btn" id="teams-search-btn" style="width: 100%;">🔍 Compare Teams</button>
+                </div>
+            </div>
+
+            <!-- Player Search -->
+            <div id="player-search" class="hidden">
+                <div class="search-row">
+                    <input type="text" class="search-input" id="player-input" placeholder="Enter player name (e.g., LeBron James)">
+                    <button type="button" class="search-btn" id="player-search-btn">🔍 Analyze Player</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="results-section"></div>
+    </div>
+
+    <script>
+        // State
+        let selectedSport = null;
+        let selectedSearchType = 'team';
+
+        // DOM Elements
+        const sportTabs = document.querySelectorAll('.sport-tab');
+        const searchTypeTabs = document.querySelectorAll('.search-type-tab');
+        const teamSearch = document.getElementById('team-search');
+        const teamsSearch = document.getElementById('teams-search');
+        const playerSearch = document.getElementById('player-search');
+        const resultsDiv = document.getElementById('results');
+
+        // Sport Tab Selection
+        sportTabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                sportTabs.forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                selectedSport = this.dataset.sport;
+            });
+        });
+
+        // Search Type Tab Selection
+        searchTypeTabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                searchTypeTabs.forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                selectedSearchType = this.dataset.type;
+
+                // Show/hide search panels
+                teamSearch.classList.add('hidden');
+                teamsSearch.classList.add('hidden');
+                playerSearch.classList.add('hidden');
+
+                if (selectedSearchType === 'team') {
+                    teamSearch.classList.remove('hidden');
+                } else if (selectedSearchType === 'teams') {
+                    teamsSearch.classList.remove('hidden');
+                } else if (selectedSearchType === 'player') {
+                    playerSearch.classList.remove('hidden');
+                }
+            });
+        });
+
+        // Ollama Test
+        document.getElementById('test-btn').addEventListener('click', async function() {
+            const prompt = document.getElementById('test-prompt').value.trim();
+            const responseDiv = document.getElementById('test-response');
+            
+            if (!prompt) return;
+
+            this.disabled = true;
+            this.textContent = 'Testing...';
+            responseDiv.classList.remove('hidden');
+            responseDiv.textContent = 'Sending request to Ollama...';
+
+            try {
+                const response = await fetch('/api/test/ollama', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    responseDiv.textContent = `✅ Success!\n\nModel: ${data.model}\n\nResponse:\n${data.response}`;
+                } else {
+                    responseDiv.textContent = `❌ Error: ${data.error}`;
+                }
+            } catch (error) {
+                responseDiv.textContent = `❌ Connection Error: ${error.message}`;
+            } finally {
+                this.disabled = false;
+                this.textContent = 'Test';
+            }
+        });
+
+        // Single Team Search
+        document.getElementById('team-search-btn').addEventListener('click', async function() {
+            const team = document.getElementById('team-input').value.trim();
+            
+            if (!selectedSport) {
+                alert('Please select a sport first');
+                return;
+            }
+            if (!team) {
+                alert('Please enter a team name');
+                return;
+            }
+
+            await performSearch('/api/search/team', { sport: selectedSport, team });
+        });
+
+        // Team Comparison Search
+        document.getElementById('teams-search-btn').addEventListener('click', async function() {
+            const team1 = document.getElementById('team1-input').value.trim();
+            const team2 = document.getElementById('team2-input').value.trim();
+            
+            if (!selectedSport) {
+                alert('Please select a sport first');
+                return;
+            }
+            if (!team1 || !team2) {
+                alert('Please enter both team names');
+                return;
+            }
+
+            await performSearch('/api/search/teams', { sport: selectedSport, team1, team2 });
+        });
+
+        // Player Search
+        document.getElementById('player-search-btn').addEventListener('click', async function() {
+            const player = document.getElementById('player-input').value.trim();
+            
+            if (!selectedSport) {
+                alert('Please select a sport first');
+                return;
+            }
+            if (!player) {
+                alert('Please enter a player name');
+                return;
+            }
+
+            await performSearch('/api/search/player', { sport: selectedSport, player });
+        });
+
+        // Enter key support
+        document.getElementById('team-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') document.getElementById('team-search-btn').click();
+        });
+        document.getElementById('team2-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') document.getElementById('teams-search-btn').click();
+        });
+        document.getElementById('player-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') document.getElementById('player-search-btn').click();
+        });
+
+        // Perform Search
+        async function performSearch(endpoint, payload) {
+            resultsDiv.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Fetching data and analyzing with AI...</p>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'An error occurred');
+                }
+
+                displayResults(data, endpoint);
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="error-card">
+                        <h3>❌ Error</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Display Results
+        function displayResults(data, endpoint) {
+            let html = '';
+
+            if (endpoint.includes('/team') && !endpoint.includes('/teams')) {
+                html = renderSingleTeamResults(data);
+            } else if (endpoint.includes('/teams')) {
+                html = renderTeamComparisonResults(data);
+            } else if (endpoint.includes('/player')) {
+                html = renderPlayerResults(data);
+            }
+
+            resultsDiv.innerHTML = html;
+        }
+
+        // Render Single Team Results
+        function renderSingleTeamResults(data) {
+            let html = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <div class="result-title">${data.team} - ${data.sport}</div>
+                        <div class="result-badge">Last 10 Games</div>
+                    </div>
+            `;
+
+            // Recent Games Table
+            if (data.recent_games && data.recent_games.length > 0) {
+                html += `<table class="games-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Opponent</th>
+                            <th>Score</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                data.recent_games.forEach(game => {
+                    const isHome = game.HomeTeam?.toUpperCase() === data.team?.toUpperCase();
+                    const opponent = isHome ? game.AwayTeam : game.HomeTeam;
+                    const teamScore = isHome ? (game.HomeTeamScore || game.HomeScore) : (game.AwayTeamScore || game.AwayScore);
+                    const oppScore = isHome ? (game.AwayTeamScore || game.AwayScore) : (game.HomeTeamScore || game.HomeScore);
+                    const won = teamScore > oppScore;
+                    const gameDate = game.DateTime || game.Day || 'N/A';
+
+                    html += `
+                        <tr>
+                            <td>${formatDate(gameDate)}</td>
+                            <td>${isHome ? 'vs' : '@'} ${opponent}</td>
+                            <td>${teamScore} - ${oppScore}</td>
+                            <td class="${won ? 'win' : 'loss'}">${won ? 'W' : 'L'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `</tbody></table>`;
+            }
+
+            // Betting Lines
+            if (data.betting_lines && data.betting_lines.length > 0) {
+                html += renderBettingLines(data.betting_lines[0]);
+            }
+
+            html += `</div>`;
+
+            // LLM Analysis
+            html += renderLLMAnalysis(data.llm_analysis);
+
+            return html;
+        }
+
+        // Render Team Comparison Results
+        function renderTeamComparisonResults(data) {
+            let html = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <div class="result-title">${data.team1.name} vs ${data.team2.name}</div>
+                        <div class="result-badge">${data.sport}</div>
+                    </div>
+
+                    <div class="comparison-grid">
+                        <div class="team-card">
+                            <div class="team-name">${data.team1.name}</div>
+                            ${renderTeamGamesTable(data.team1.recent_games, data.team1.name)}
+                        </div>
+                        <div class="team-card">
+                            <div class="team-name">${data.team2.name}</div>
+                            ${renderTeamGamesTable(data.team2.recent_games, data.team2.name)}
+                        </div>
+                    </div>
+            `;
+
+            // Matchup betting lines
+            if (data.betting_lines) {
+                html += renderBettingLines(data.betting_lines);
+            }
+
+            html += `</div>`;
+
+            // LLM Analysis
+            html += renderLLMAnalysis(data.llm_analysis);
+
+            return html;
+        }
+
+        // Render Player Results
+        function renderPlayerResults(data) {
+            let html = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <div class="result-title">${data.player}</div>
+                        <div class="result-badge">${data.team} - ${data.sport}</div>
+                    </div>
+            `;
+
+            // Season Stats
+            if (data.season_stats) {
+                html += `<div class="betting-section">
+                    <div class="betting-title">Season Stats</div>
+                    <div class="betting-grid">`;
+
+                const stats = data.season_stats;
+                if (data.sport === 'NBA') {
+                    html += statItem('PPG', stats.Points || stats.PointsPerGame || '-');
+                    html += statItem('RPG', stats.Rebounds || stats.ReboundsPerGame || '-');
+                    html += statItem('APG', stats.Assists || stats.AssistsPerGame || '-');
+                } else if (data.sport === 'NFL') {
+                    html += statItem('Pass Yds', stats.PassingYards || '-');
+                    html += statItem('Rush Yds', stats.RushingYards || '-');
+                    html += statItem('TDs', stats.Touchdowns || '-');
+                } else if (data.sport === 'NHL') {
+                    html += statItem('Goals', stats.Goals || '-');
+                    html += statItem('Assists', stats.Assists || '-');
+                    html += statItem('Points', stats.Points || '-');
+                }
+
+                html += `</div></div>`;
+            }
+
+            // Game Logs
+            if (data.game_logs && data.game_logs.length > 0) {
+                html += `<h4 style="margin: 20px 0 15px; color: #888;">Last 10 Games</h4>
+                    <table class="games-table">
+                    <thead><tr><th>Date</th><th>Opponent</th><th>Stats</th></tr></thead>
+                    <tbody>`;
+
+                data.game_logs.forEach(game => {
+                    const gameDate = game.DateTime || game.Day || game.GameDate || 'N/A';
+                    const opponent = game.Opponent || game.OpponentTeam || '-';
+                    
+                    let stats = '-';
+                    if (data.sport === 'NBA') {
+                        stats = `${game.Points || 0} PTS, ${game.Rebounds || 0} REB, ${game.Assists || 0} AST`;
+                    } else if (data.sport === 'NFL') {
+                        stats = `${game.PassingYards || 0} Pass, ${game.RushingYards || 0} Rush`;
+                    } else if (data.sport === 'NHL') {
+                        stats = `${game.Goals || 0} G, ${game.Assists || 0} A`;
+                    }
+
+                    html += `<tr><td>${formatDate(gameDate)}</td><td>${opponent}</td><td>${stats}</td></tr>`;
+                });
+
+                html += `</tbody></table>`;
+            }
+
+            // Betting Props
+            if (data.betting_props && data.betting_props.length > 0) {
+                html += `<div class="betting-section">
+                    <div class="betting-title">Available Props</div>
+                    <div class="betting-grid">`;
+
+                data.betting_props.slice(0, 6).forEach(prop => {
+                    html += `<div class="betting-item">
+                        <div class="betting-label">${prop.BetType || prop.PropType || 'Prop'}</div>
+                        <div class="betting-value">${prop.Line || prop.OverUnder || '-'}</div>
+                    </div>`;
+                });
+
+                html += `</div></div>`;
+            }
+
+            html += `</div>`;
+
+            // LLM Analysis
+            html += renderLLMAnalysis(data.llm_analysis);
+
+            return html;
+        }
+
+        // Helper: Render team games table
+        function renderTeamGamesTable(games, teamName) {
+            if (!games || games.length === 0) return '<p>No games found</p>';
+
+            let html = `<table class="games-table"><thead><tr><th>Date</th><th>Result</th></tr></thead><tbody>`;
+
+            games.forEach(game => {
+                const isHome = game.HomeTeam?.toUpperCase() === teamName?.toUpperCase();
+                const opponent = isHome ? game.AwayTeam : game.HomeTeam;
+                const teamScore = isHome ? (game.HomeTeamScore || game.HomeScore) : (game.AwayTeamScore || game.AwayScore);
+                const oppScore = isHome ? (game.AwayTeamScore || game.AwayScore) : (game.HomeTeamScore || game.HomeScore);
+                const won = teamScore > oppScore;
+                const gameDate = game.DateTime || game.Day || 'N/A';
+
+                html += `<tr>
+                    <td>${formatDate(gameDate)}</td>
+                    <td class="${won ? 'win' : 'loss'}">${won ? 'W' : 'L'} ${teamScore}-${oppScore} vs ${opponent}</td>
+                </tr>`;
+            });
+
+            html += `</tbody></table>`;
+            return html;
+        }
+
+        // Helper: Render betting lines
+        function renderBettingLines(lines) {
+            if (!lines) return '';
+
+            let html = `<div class="betting-section">
+                <div class="betting-title">📊 Betting Lines</div>
+                <div class="betting-grid">`;
+
+            if (lines.HomeMoneyLine || lines.AwayMoneyLine) {
+                html += statItem('Home ML', lines.HomeMoneyLine || '-');
+                html += statItem('Away ML', lines.AwayMoneyLine || '-');
+            }
+            if (lines.PointSpread || lines.Spread) {
+                html += statItem('Spread', lines.PointSpread || lines.Spread || '-');
+            }
+            if (lines.OverUnder || lines.TotalScore) {
+                html += statItem('O/U', lines.OverUnder || lines.TotalScore || '-');
+            }
+
+            html += `</div></div>`;
+            return html;
+        }
+
+        // Helper: Render stat item
+        function statItem(label, value) {
+            return `<div class="betting-item">
+                <div class="betting-label">${label}</div>
+                <div class="betting-value">${value}</div>
+            </div>`;
+        }
+
+        // Helper: Render LLM Analysis
+        function renderLLMAnalysis(llm) {
+            if (!llm) return '';
+
+            let html = `<div class="llm-section">
+                <div class="llm-header">
+                    <span class="llm-icon">🤖</span>
+                    <span class="llm-title">AI Analysis (Ollama - qwen3:4b)</span>
+                </div>`;
+
+            if (llm.success) {
+                html += `<div class="llm-content">${llm.analysis}</div>`;
+            } else {
+                html += `<div class="llm-error">Analysis unavailable: ${llm.error || 'Unknown error'}</div>`;
+            }
+
+            html += `</div>`;
+            return html;
+        }
+
+        // Helper: Format date
+        function formatDate(dateStr) {
+            if (!dateStr || dateStr === 'N/A') return 'N/A';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            } catch {
+                return dateStr;
+            }
+        }
+    </script>
+</body>
+</html>
