@@ -12,14 +12,42 @@ from datetime import datetime, timedelta
 import os
 import logging
 import sys
+from collections import deque
+
+# =============================================================================
+# IN-MEMORY LOG BUFFER FOR /logs PAGE
+# =============================================================================
+class LogBuffer(logging.Handler):
+    def __init__(self, max_logs=500):
+        super().__init__()
+        self.logs = deque(maxlen=max_logs)
+    
+    def emit(self, record):
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'level': record.levelname,
+            'message': self.format(record)
+        }
+        self.logs.append(log_entry)
+    
+    def get_logs(self):
+        return list(self.logs)
+    
+    def clear(self):
+        self.logs.clear()
+
+log_buffer = LogBuffer(max_logs=500)
+log_buffer.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG for verbose logging
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+logger.addHandler(log_buffer)
+logger.setLevel(logging.DEBUG)
 
 app = Flask(__name__)
 
@@ -167,11 +195,17 @@ class SportsDataAPI:
             params = {}
         params['key'] = self.api_key
         
+        logger.debug(f"API Request to: {url}")
+        
         try:
             response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
             self.request_count += 1
-            logger.info(f"API Request #{self.request_count}: {url}")
+            logger.info(f"API Request #{self.request_count}: {url} - Status: {response.status_code}")
+            
+            if not response.ok:
+                logger.error(f"API Error: {response.status_code} - {response.text[:200]}")
+                return None
+            
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
@@ -725,6 +759,199 @@ def health():
         "timestamp": datetime.now().isoformat(),
         "api_calls_made": api.request_count
     })
+
+
+# =============================================================================
+# LOGGING & DEBUG ROUTES
+# =============================================================================
+@app.route('/logs')
+def logs_page():
+    """Display application logs in browser"""
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>App Logs - Sports Analyzer</title>
+    <style>
+        body { background: #1a1a2e; color: #fff; font-family: monospace; padding: 20px; }
+        h1 { color: #00d4ff; }
+        .controls { margin-bottom: 20px; }
+        button { padding: 10px 20px; margin-right: 10px; background: #7b2cbf; color: #fff; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #9b4ddf; }
+        .log-entry { padding: 8px; border-bottom: 1px solid #333; }
+        .DEBUG { color: #888; }
+        .INFO { color: #00d4ff; }
+        .WARNING { color: #ffa500; }
+        .ERROR { color: #ff4757; }
+        .CRITICAL { color: #ff0000; font-weight: bold; }
+        #logs { max-height: 80vh; overflow-y: auto; background: #0d0d1a; padding: 15px; border-radius: 8px; }
+        .config { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .config h3 { margin-top: 0; color: #00d4ff; }
+    </style>
+</head>
+<body>
+    <h1>📋 Application Logs</h1>
+    
+    <div class="config">
+        <h3>Current Configuration</h3>
+        <div id="config"></div>
+    </div>
+    
+    <div class="controls">
+        <button onclick="fetchLogs()">🔄 Refresh</button>
+        <button onclick="clearLogs()">🗑️ Clear Logs</button>
+        <button onclick="testEndpoints()">🧪 Test All Endpoints</button>
+        <label style="margin-left: 20px;">
+            <input type="checkbox" id="auto-refresh"> Auto-refresh (5s)
+        </label>
+    </div>
+    
+    <div id="logs"></div>
+    
+    <script>
+        let autoRefreshInterval;
+        
+        async function fetchConfig() {
+            try {
+                const res = await fetch('/api/debug/config');
+                const data = await res.json();
+                document.getElementById('config').innerHTML = `
+                    <p><strong>SportsData API Key:</strong> ${data.sportsdata_api_key}</p>
+                    <p><strong>Ollama Host:</strong> ${data.ollama_host}</p>
+                    <p><strong>Ollama Model:</strong> ${data.ollama_model}</p>
+                    <p><strong>Database Path:</strong> ${data.database_path}</p>
+                    <p><strong>API Calls Made:</strong> ${data.api_calls_made}</p>
+                `;
+            } catch(e) {
+                document.getElementById('config').innerHTML = '<p style="color: #ff4757;">Failed to load config</p>';
+            }
+        }
+        
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/api/logs');
+                const logs = await res.json();
+                const container = document.getElementById('logs');
+                container.innerHTML = logs.map(log => 
+                    `<div class="log-entry ${log.level}"><strong>[${log.level}]</strong> ${log.timestamp} - ${log.message}</div>`
+                ).reverse().join('');
+            } catch(e) {
+                document.getElementById('logs').innerHTML = '<p style="color: #ff4757;">Failed to fetch logs: ' + e.message + '</p>';
+            }
+        }
+        
+        async function clearLogs() {
+            await fetch('/api/logs/clear', { method: 'POST' });
+            fetchLogs();
+        }
+        
+        async function testEndpoints() {
+            const results = [];
+            
+            // Test health
+            try {
+                const res = await fetch('/api/health');
+                results.push('✅ /api/health: ' + res.status);
+            } catch(e) {
+                results.push('❌ /api/health: ' + e.message);
+            }
+            
+            // Test Ollama
+            try {
+                const res = await fetch('/api/test/ollama', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({prompt: 'test'})
+                });
+                const data = await res.json();
+                results.push(data.success ? '✅ Ollama: Connected' : '❌ Ollama: ' + data.error);
+            } catch(e) {
+                results.push('❌ Ollama: ' + e.message);
+            }
+            
+            // Test SportsData API
+            try {
+                const res = await fetch('/api/debug/test-sportsdata');
+                const data = await res.json();
+                results.push(data.success ? '✅ SportsData API: Connected' : '❌ SportsData API: ' + data.error);
+            } catch(e) {
+                results.push('❌ SportsData API: ' + e.message);
+            }
+            
+            alert(results.join('\\n'));
+            fetchLogs();
+        }
+        
+        document.getElementById('auto-refresh').addEventListener('change', function() {
+            if (this.checked) {
+                autoRefreshInterval = setInterval(fetchLogs, 5000);
+            } else {
+                clearInterval(autoRefreshInterval);
+            }
+        });
+        
+        fetchConfig();
+        fetchLogs();
+    </script>
+</body>
+</html>
+'''
+
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Get application logs as JSON"""
+    return jsonify(log_buffer.get_logs())
+
+
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_logs():
+    """Clear the log buffer"""
+    log_buffer.clear()
+    logger.info("Logs cleared by user")
+    return jsonify({"success": True})
+
+
+@app.route('/api/debug/config', methods=['GET'])
+def get_config():
+    """Get current configuration"""
+    return jsonify({
+        "sportsdata_api_key": SPORTSDATA_API_KEY[:8] + "..." if SPORTSDATA_API_KEY else "NOT SET",
+        "ollama_host": OLLAMA_HOST,
+        "ollama_model": OLLAMA_MODEL,
+        "database_path": DATABASE_PATH,
+        "api_calls_made": api.request_count
+    })
+
+
+@app.route('/api/debug/test-sportsdata', methods=['GET'])
+def test_sportsdata():
+    """Test SportsData.io API connection"""
+    try:
+        url = f"{SPORTSDATA_ENDPOINTS['NBA']['scores']}/teams"
+        logger.info(f"Testing SportsData API: {url}")
+        
+        response = requests.get(url, params={'key': SPORTSDATA_API_KEY}, timeout=10)
+        logger.info(f"SportsData API response: {response.status_code}")
+        
+        if response.ok:
+            teams = response.json()
+            return jsonify({
+                "success": True,
+                "message": f"Connected! Found {len(teams)} NBA teams",
+                "sample": teams[0] if teams else None
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"Status {response.status_code}: {response.text[:200]}"
+            })
+    except Exception as e:
+        logger.error(f"SportsData API test failed: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
 
 # =============================================================================
