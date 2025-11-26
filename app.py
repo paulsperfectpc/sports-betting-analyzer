@@ -51,6 +51,26 @@ logger.setLevel(logging.DEBUG)
 
 app = Flask(__name__)
 
+# =============================================================================
+# ERROR HANDLERS - Always return JSON, never HTML
+# =============================================================================
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handle all uncaught exceptions and return JSON"""
+    logger.error(f"Unhandled exception: {e}", exc_info=True)
+    return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 errors"""
+    return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Handle 500 errors"""
+    logger.error(f"Internal error: {e}", exc_info=True)
+    return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
 # Flag to track if database has been initialized
 _db_initialized = False
 
@@ -488,12 +508,23 @@ def get_cached_count(sport, team_key):
 # LLM INTEGRATION
 # =============================================================================
 def analyze_with_llm(data, query_type):
-    """Send data to Ollama for analysis"""
+    """Send data to Ollama for analysis - non-blocking with short timeout"""
     try:
+        # Limit data size to prevent huge prompts
+        limited_data = {k: v for k, v in data.items() if k not in ['llm_analysis']}
+        
+        # Truncate game data to last 5 games to keep prompt manageable
+        if 'recent_games' in limited_data:
+            limited_data['recent_games'] = limited_data['recent_games'][:5]
+        if 'team1' in limited_data and 'recent_games' in limited_data.get('team1', {}):
+            limited_data['team1']['recent_games'] = limited_data['team1']['recent_games'][:5]
+        if 'team2' in limited_data and 'recent_games' in limited_data.get('team2', {}):
+            limited_data['team2']['recent_games'] = limited_data['team2']['recent_games'][:5]
+        
         if query_type == 'team':
             prompt = f"""You are a sports betting analyst. Analyze the following team data and betting lines.
             
-Data: {json.dumps(data, indent=2)}
+Data: {json.dumps(limited_data, indent=2)}
 
 Based on this data, provide:
 1. Your prediction for the team's next game (win/loss)
@@ -506,7 +537,7 @@ Be concise but thorough. Format your response clearly with sections."""
         elif query_type == 'team_comparison':
             prompt = f"""You are a sports betting analyst. Analyze this matchup between two teams.
             
-Data: {json.dumps(data, indent=2)}
+Data: {json.dumps(limited_data, indent=2)}
 
 Based on this data, provide:
 1. Predicted winner and score prediction
@@ -520,7 +551,7 @@ Be specific with numbers and confidence levels."""
         elif query_type == 'player':
             prompt = f"""You are a sports betting analyst specializing in player props.
             
-Player Data: {json.dumps(data, indent=2)}
+Player Data: {json.dumps(limited_data, indent=2)}
 
 Based on this player's recent performance, provide:
 1. Analysis of their recent form and trends
@@ -531,9 +562,9 @@ Based on this player's recent performance, provide:
 Focus on statistical trends and matchup factors."""
 
         else:
-            prompt = f"Analyze this sports data: {json.dumps(data)}"
+            prompt = f"Analyze this sports data: {json.dumps(limited_data)}"
         
-        # Call Ollama
+        # Call Ollama with shorter timeout (30s) to prevent blocking
         response = requests.post(
             f"{OLLAMA_HOST}/api/generate",
             json={
@@ -542,10 +573,10 @@ Focus on statistical trends and matchup factors."""
                 "stream": False,
                 "options": {
                     "temperature": 0.7,
-                    "num_predict": 1000
+                    "num_predict": 500  # Reduced for faster response
                 }
             },
-            timeout=120
+            timeout=30
         )
         
         if response.ok:

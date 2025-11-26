@@ -17,4 +17,5 @@ RUN mkdir -p /app/data
 EXPOSE 11200
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:11200", "--workers", "2", "--timeout", "120", "app:app"]
+# Increased timeout to handle Ollama LLM calls
+CMD ["gunicorn", "--bind", "0.0.0.0:11200", "--workers", "2", "--timeout", "180", "--graceful-timeout", "60", "app:app"]

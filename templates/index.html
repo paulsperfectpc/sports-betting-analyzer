@@ -654,7 +654,17 @@
                     body: JSON.stringify(payload)
                 });
 
-                const data = await response.json();
+                // Get response text first, then try to parse as JSON
+                const responseText = await response.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    // Response isn't JSON (probably HTML error page)
+                    console.error('Non-JSON response:', responseText.substring(0, 500));
+                    throw new Error('Server returned an invalid response. Please check the logs page.');
+                }
 
                 if (!response.ok) {
                     throw new Error(data.error || 'An error occurred');
