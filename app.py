@@ -296,6 +296,8 @@ class SportsDataAPI:
         if season is None:
             season = self.get_current_season(sport)
         
+        logger.info(f"Fetching {sport} schedule for season: {season}")
+        
         base_url = SPORTSDATA_ENDPOINTS[sport]['scores']
         
         if sport == 'NFL':
@@ -305,7 +307,10 @@ class SportsDataAPI:
         
         all_games = self._make_request(url)
         if not all_games:
+            logger.warning(f"No games returned for {sport} season {season}")
             return []
+        
+        logger.info(f"Got {len(all_games)} total games for {sport} season {season}")
         
         # Filter for team's games
         team_games = []
@@ -315,6 +320,7 @@ class SportsDataAPI:
             if team_key.upper() in [home.upper(), away.upper()]:
                 team_games.append(game)
         
+        logger.info(f"Found {len(team_games)} games for team {team_key}")
         return team_games
     
     def get_completed_games(self, sport, team_key, limit=10):
@@ -905,6 +911,36 @@ def search_player():
     except Exception as e:
         logger.error(f"Player search error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/cache/clear', methods=['POST'])
+def clear_cache():
+    """Clear all cached data to force fresh API calls"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM games')
+        cursor.execute('DELETE FROM teams')
+        conn.commit()
+        conn.close()
+        logger.info("Cache cleared successfully")
+        return jsonify({"success": True, "message": "Cache cleared"})
+    except Exception as e:
+        logger.error(f"Cache clear error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/debug/season', methods=['GET'])
+def debug_season():
+    """Show what season is being used for each sport"""
+    return jsonify({
+        "current_date": datetime.now().isoformat(),
+        "seasons": {
+            "NFL": api.get_current_season('NFL'),
+            "NBA": api.get_current_season('NBA'),
+            "NHL": api.get_current_season('NHL')
+        }
+    })
 
 
 @app.route('/api/test/ollama', methods=['POST'])
